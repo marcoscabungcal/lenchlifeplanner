@@ -72,14 +72,14 @@
   .dash-handle { position: absolute; top: 0.5rem; right: 0.5rem; color: rgba(115,106,92,0.35); padding: 0.25rem; }
   .dash-widget:hover .dash-handle { color: #736A5C; }
   .chev-flip { transform: rotate(180deg); }
-  /* Keep the dashboard ordered left-to-right, then top-to-bottom. Free resizing
-     made cards create holes and pushed later cards around unpredictably. */
-  .dashboard-grid { grid-auto-flow: row; grid-template-columns: repeat(12, minmax(0, 1fr)); grid-auto-rows: 18rem; align-items: stretch; overflow: visible; }
-  .dashboard-grid > .dash-resizable { min-width: 0; min-height: 18rem; height: 18rem; overflow: hidden; }
+  /* Keep the dashboard ordered left-to-right, then top-to-bottom while letting
+     cards reflow to fill gaps when widths change. */
+  .dashboard-grid { grid-auto-flow: row dense; grid-template-columns: repeat(12, minmax(0, 1fr)); grid-auto-rows: 16.5rem; align-items: stretch; overflow: visible; }
+  .dashboard-grid > .dash-resizable { min-width: 0; min-height: 16.5rem; height: 16.5rem; overflow: hidden; }
   .dash-width-tools { white-space: nowrap; }
-  .dash-corner-resize { position: absolute; right: .35rem; bottom: .35rem; width: 1.15rem; height: 1.15rem; display: flex; align-items: center; justify-content: center; border-radius: .35rem; color: rgba(115,106,92,.55); cursor: nwse-resize; touch-action: none; opacity: .55; transition: opacity .15s ease, background .15s ease, color .15s ease; }
+  .dash-corner-resize { position: absolute; top: 50%; right: .25rem; transform: translateY(-50%); width: .95rem; height: 2rem; display: flex; align-items: center; justify-content: center; border-radius: .45rem; color: rgba(115,106,92,.55); cursor: ew-resize; touch-action: none; opacity: .55; transition: opacity .15s ease, background .15s ease, color .15s ease; }
   .dash-corner-resize:hover { opacity: 1; color: #2F4A3C; background: #EDE4D2; }
-  .dash-corner-resize::before { content: '◢'; font-size: .78rem; line-height: 1; }
+  .dash-corner-resize::before { content: '⋮'; font-size: .72rem; line-height: 1; }
   .sidebar-subnav { max-height: 0; opacity: 0; overflow: hidden; transition: max-height .2s ease, opacity .15s ease, margin-top .2s ease; pointer-events: none; }
   .sidebar-subnav.is-open { max-height: 30rem; opacity: 1; margin-top: .25rem; pointer-events: auto; }
   .task-overview { transition: padding .2s ease, box-shadow .2s ease; }
@@ -101,11 +101,11 @@
   .sidebar-shell.is-collapsed .sidebar-main-button > span { display: none; }
   .sidebar-edge-toggle { position: absolute; top: 50%; right: -10px; z-index: 20; width: 20px; height: 52px; transform: translateY(-50%); display: flex; align-items: center; justify-content: center; border: 1px solid rgba(246,241,230,.25); border-left: 0; border-radius: 0 10px 10px 0; background: #2F4A3C; color: #F6F1E6; box-shadow: 3px 0 8px rgba(38,57,46,.16); cursor: pointer; transition: background .15s ease, width .15s ease; }
   .sidebar-edge-toggle:hover { width: 24px; background: #3D624E; }
-  /* Let longer views, especially the tall calendar, scroll with the page
-     instead of being clipped inside the fixed-height app shell. */
-  html, body { height: auto; min-height: 100%; overflow-y: auto; }
-  #root { min-height: 100vh; }
-  .app-shell, .app-main, .app-content { height: auto !important; min-height: 100vh; overflow: visible !important; }
+  html, body, #root { height: 100%; min-height: 100%; }
+  body { overflow: hidden; }
+  .app-shell { height: 100vh; min-height: 100vh; }
+  .app-main, .app-content { min-height: 0; }
+  .app-content { overflow-y: auto; }
   .sidebar-shell { position: sticky; top: 0; align-self: flex-start; height: 100vh; max-height: 100vh; overflow-y: auto; overflow-x: visible; }
   .sidebar-shell > .sidebar-nav { flex: 0 0 auto; overflow: visible; }
   @media (max-width: 1023px) {
@@ -397,6 +397,9 @@ function pctLegendLabels(chart) {
     }));
 }
 const STORAGE_KEY = 'lenchLifePlanner.v1';
+const DEFAULT_DASHBOARD_ORDER = ['savings', 'spending', 'goals', 'calendar', 'tasks', 'transactions', 'stats', 'agenda', 'notes'];
+const DEFAULT_DASHBOARD_SIZES = { savings: 4, spending: 4, goals: 4, calendar: 12, tasks: 6, transactions: 6, stats: 4, agenda: 4, notes: 4 };
+const DEFAULT_DASHBOARD_HIDDEN = ['stats', 'agenda', 'notes'];
 const defaultState = {
     categories: {
         income: ['Allowance', 'Part-Time Job', 'Scholarship / Financial Aid', 'Gift', 'Refund', 'Other Income'],
@@ -410,9 +413,9 @@ const defaultState = {
     transactions: [],
     masterTarget: 0,
     budgets: {},
-    dashboardOrder: [],
-    dashboardSizes: {},
-    dashboardHidden: [],
+    dashboardOrder: [...DEFAULT_DASHBOARD_ORDER],
+    dashboardSizes: { ...DEFAULT_DASHBOARD_SIZES },
+    dashboardHidden: [...DEFAULT_DASHBOARD_HIDDEN],
     notes: [],
     monthlyNotes: {},
     preferences: { theme: 'light', accent: '#2F4A3C', weekStart: 'sunday', defaultPriority: 'Medium', defaultStatus: 'Backlog', showCompleted: true, notificationsEnabled: false },
@@ -515,6 +518,10 @@ function sanitizeState(saved) {
     const obj = (v) => v && typeof v === 'object' && !Array.isArray(v) ? v : {};
     const cats = obj(s.categories);
     const prefs = { ...defaultState.preferences, ...obj(s.preferences) };
+    const savedOrder = arr(s.dashboardOrder);
+    const savedSizes = obj(s.dashboardSizes);
+    const savedHidden = arr(s.dashboardHidden);
+    const hasCustomDashboardLayout = savedOrder.length > 0 || Object.keys(savedSizes).length > 0 || savedHidden.length > 0;
     return {
         ...defaultState,
         ...s,
@@ -523,8 +530,9 @@ function sanitizeState(saved) {
         transactions: arr(s.transactions).filter(t => t && typeof t === 'object').map(t => ({ ...t, id: t.id || uid() })),
         budgets: obj(s.budgets),
         masterTarget: Number(s.masterTarget) || 0,
-        dashboardOrder: arr(s.dashboardOrder), dashboardSizes: obj(s.dashboardSizes),
-        dashboardHidden: arr(s.dashboardHidden),
+        dashboardOrder: savedOrder.length ? savedOrder : [...DEFAULT_DASHBOARD_ORDER],
+        dashboardSizes: Object.keys(savedSizes).length ? savedSizes : { ...DEFAULT_DASHBOARD_SIZES },
+        dashboardHidden: hasCustomDashboardLayout ? savedHidden : [...DEFAULT_DASHBOARD_HIDDEN],
         notes: arr(s.notes).filter(n => n && typeof n === 'object').map(n => ({ ...n, id: n.id || uid() })),
         monthlyNotes: obj(s.monthlyNotes),
         preferences: prefs,
@@ -591,7 +599,7 @@ function AppProvider({ children }) {
         setDashboardOrder: (order) => patch(s => ({ ...s, dashboardOrder: order })),
         setDashboardSize: (id, size) => patch(s => ({ ...s, dashboardSizes: { ...(s.dashboardSizes || {}), [id]: size } })),
         setDashboardHidden: (id, hidden) => patch(s => ({ ...s, dashboardHidden: hidden ? [...new Set([...(s.dashboardHidden || []), id])] : (s.dashboardHidden || []).filter(x => x !== id) })),
-        resetDashboard: () => patch(s => ({ ...s, dashboardOrder: [], dashboardSizes: {}, dashboardHidden: [] })),
+        resetDashboard: () => patch(s => ({ ...s, dashboardOrder: [...DEFAULT_DASHBOARD_ORDER], dashboardSizes: { ...DEFAULT_DASHBOARD_SIZES }, dashboardHidden: [...DEFAULT_DASHBOARD_HIDDEN] })),
         setPreference: (key, value) => patch(s => ({ ...s, preferences: { ...defaultState.preferences, ...(s.preferences || {}), [key]: value } })),
         requestNotifications: async () => {
             if (typeof Notification === 'undefined') return 'unsupported';
@@ -662,14 +670,20 @@ function EmptyState({ icon, title, subtitle }) {
         React.createElement("p", { className: "text-xs max-w-[220px]" }, subtitle)));
 }
 /* ---------------- Sidebar ---------------- */
-/* reorganized sidebar: Dashboard, Tasks, Finances (Goals moved here), Settings */
+/* Sidebar sections */
 const SIDEBAR_ITEMS = [
     { id: 'dashboard', label: 'Dashboard', icon: 'home' },
     { id: 'tasks', label: 'Tasks', icon: 'leaf-check', children: [
-        { id: 'board', label: 'Board' }, { id: 'list', label: 'List' }, { id: 'completed', label: 'Completed' }, { id: 'calendar', label: 'Calendar' }, { id: 'progress', label: 'Progress report' },
+        { id: 'board', label: 'Board' }, { id: 'list', label: 'List' }, { id: 'completed', label: 'Completed' },
+    ] },
+    { id: 'calendar', label: 'Calendar', icon: 'calendar', children: [
+        { id: 'month', label: 'Month view' }, { id: 'agenda', label: 'Agenda (selected day)' },
+    ] },
+    { id: 'goals', label: 'Goals', icon: 'target', children: [
+        { id: 'list', label: 'My goals' }, { id: 'split', label: 'Split money' },
     ] },
     { id: 'finances', label: 'Finances', icon: 'wallet', children: [
-        { id: 'overview', label: 'Overview' }, { id: 'transactions', label: 'Transactions' }, { id: 'categories', label: 'Categories & budgets' }, { id: 'goals', label: 'Goals' },
+        { id: 'overview', label: 'Overview' }, { id: 'transactions', label: 'Transactions' }, { id: 'categories', label: 'Categories & budgets' },
     ] },
     { id: 'settings', label: 'Settings', icon: 'gear', children: [
         { id: 'backup', label: 'Backup & export' }, { id: 'about', label: 'About this data' },
@@ -688,13 +702,14 @@ function Sidebar({ view, setView, nav, navigate }) {
         catch (e) {}
     }, [collapsed]);
     const handleGroupClick = (it, hasChildren) => {
+        const defaultChild = hasChildren && it.children && it.children.length ? it.children[0].id : null;
         if (!hasChildren) {
             navigate(it.id, null);
             return;
         }
         if (view !== it.id) {
             setOpenGroup(it.id);
-            navigate(it.id, null);
+            navigate(it.id, defaultChild);
         }
         else {
             setOpenGroup(current => current === it.id ? null : it.id);
@@ -779,6 +794,54 @@ function NotesWidget() {
                             React.createElement("button", { onClick: () => updateNote(n.id, { pinned: !n.pinned }), className: "text-stone hover:text-forest2 p-1", title: "Pin note" }, n.pinned ? "★" : "☆"),
                             React.createElement("button", { onClick: () => deleteNote(n.id), className: "text-stone hover:text-[#9C4B3E] p-1", title: "Delete note" }, React.createElement(Icon, { name: "trash", size: 12 }))))))));
 }
+function DashboardCalendarWidget({ navigate }) {
+    const { state } = useApp();
+    const todayStr = localDateKey();
+    const [cursor, setCursor] = useState(() => { const d = new Date(); return { y: d.getFullYear(), m: d.getMonth() }; });
+    const [selectedDate, setSelectedDate] = useState(todayStr);
+    const byDate = useMemo(() => {
+        const m = {};
+        state.tasks.forEach(t => {
+            if (!t.dueDate) return;
+            if (!m[t.dueDate]) m[t.dueDate] = [];
+            m[t.dueDate].push(t);
+        });
+        return m;
+    }, [state.tasks]);
+    const { y, m } = cursor;
+    const monthStart = `${y}-${String(m + 1).padStart(2, '0')}-01`;
+    const firstDow = new Date(y, m, 1).getDay();
+    const cells = rangeKeys(addDateDays(monthStart, -firstDow), 42).map(key => ({ key, label: dateFromKey(key).getDate(), faded: dateFromKey(key).getMonth() !== m }));
+    const monthTitle = new Date(y, m, 1).toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+    const selectedTasks = (byDate[selectedDate] || []).slice().sort((a, b) => (a.dueTime || '99:99').localeCompare(b.dueTime || '99:99')).slice(0, 4);
+    return React.createElement("div", { className: "h-full min-h-0 flex flex-col gap-2" },
+        React.createElement("div", { className: "flex items-center justify-between gap-2" },
+            React.createElement("p", { className: "text-xs font-semibold text-stone uppercase tracking-wide" }, "Calendar"),
+            React.createElement("button", { onClick: () => navigate('calendar', 'month'), className: "text-forest2 text-xs font-semibold flex items-center gap-0.5 hover:underline" },
+                "Open calendar ",
+                React.createElement(Icon, { name: "chevron-right", size: 13 }))),
+        React.createElement("div", { className: "grid grid-cols-12 gap-3 flex-1 min-h-0" },
+            React.createElement("div", { className: "col-span-12 lg:col-span-8 bg-creamdark/30 rounded-xl overflow-hidden flex flex-col min-h-0" },
+                React.createElement("div", { className: "flex items-center justify-between px-2 py-1.5 border-b border-creamdark/70" },
+                    React.createElement("button", { className: "btn btn-outline btn-sm !px-2", onClick: () => setCursor(c => { const d = new Date(c.y, c.m - 1, 1); return { y: d.getFullYear(), m: d.getMonth() }; }) }, React.createElement(Icon, { name: "chevron-right", size: 12, className: "chev-flip" })),
+                    React.createElement("span", { className: "text-[11px] font-semibold text-forest" }, monthTitle),
+                    React.createElement("button", { className: "btn btn-outline btn-sm !px-2", onClick: () => setCursor(c => { const d = new Date(c.y, c.m + 1, 1); return { y: d.getFullYear(), m: d.getMonth() }; }) }, React.createElement(Icon, { name: "chevron-right", size: 12 }))),
+                React.createElement("div", { className: "calendar-week-grid text-[10px] text-stone uppercase tracking-wide border-b border-creamdark/70 bg-creamdark/30" }, ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(d => React.createElement("div", { key: d, className: "text-center py-1 border-r border-creamdark/70 last:border-r-0" }, d))),
+                React.createElement("div", { className: "calendar-month-grid flex-1 min-h-0 text-[10px]" }, cells.map(cell => {
+                    const count = (byDate[cell.key] || []).filter(t => t.status !== 'Completed').length;
+                    const isToday = cell.key === todayStr;
+                    const isSelected = cell.key === selectedDate;
+                    return React.createElement("button", { key: cell.key, onClick: () => setSelectedDate(cell.key), className: `border-r border-b border-creamdark/70 [&:nth-child(7n)]:border-r-0 p-1 text-left min-h-0 flex flex-col ${cell.faded ? 'bg-creamdark/10 text-stone/60' : 'bg-cream'} ${isSelected ? 'ring-2 ring-inset ring-forest2 z-10' : 'hover:bg-creamdark/30'}` },
+                        React.createElement("span", { className: `inline-flex items-center justify-center w-4 h-4 rounded-full ${isToday ? 'bg-forest2 text-cream' : 'text-forest'}` }, cell.label),
+                        count > 0 ? React.createElement("span", { className: "mt-auto text-[9px] text-stone font-semibold" }, count) : null);
+                }))),
+            React.createElement("div", { className: "col-span-12 lg:col-span-4 bg-creamdark/30 rounded-xl p-2.5 flex flex-col min-h-0" },
+                React.createElement("p", { className: "font-display text-sm text-forest" }, dateFromKey(selectedDate).toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' })),
+                selectedTasks.length === 0 ? React.createElement("p", { className: "text-xs text-stone mt-2" }, "No scheduled items.") : React.createElement("ul", { className: "mt-2 space-y-1 overflow-y-auto scroll-y pr-1" }, selectedTasks.map(t => React.createElement("li", { key: t.id, className: "bg-cream rounded-lg px-2 py-1.5 text-[11px]" },
+                    React.createElement("p", { className: "font-semibold text-forest truncate" }, t.dueTime ? `${t.dueTime} · ` : '', t.title),
+                    React.createElement("p", { className: "text-stone truncate" }, t.category || 'General')))),
+                React.createElement("button", { onClick: () => navigate('calendar', 'agenda'), className: "btn btn-outline btn-sm mt-2 self-start" }, "Agenda"))));
+}
 function Dashboard({ navigate }) {
     const { state, setDashboardOrder, setDashboardHidden, setDashboardSize, resetDashboard } = useApp();
     const { tasks, goals, transactions, masterTarget } = state;
@@ -787,8 +850,8 @@ function Dashboard({ navigate }) {
     const upcoming = [...tasks].filter(t => t.status !== 'Completed').sort((a, b) => (a.dueDate || '9999').localeCompare(b.dueDate || '9999')).slice(0, 5);
     const recentTx = transactions.slice(0, 5);
     const activeGoals = goals.slice(0, 8);
-    const todayStr = new Date().toISOString().slice(0, 10);
-    const weekAgoStr = new Date(Date.now() - 7 * 86400000).toISOString().slice(0, 10);
+    const todayStr = localDateKey();
+    const weekAgoStr = addDateDays(todayStr, -7);
     const completedThisWeek = tasks.filter(t => t.status === 'Completed' && t.completedAt && t.completedAt.slice(0, 10) >= weekAgoStr).length;
     const openTasks = tasks.filter(t => t.status !== 'Completed').length;
     const overdueTasks = tasks.filter(t => t.status !== 'Completed' && t.dueDate && t.dueDate < todayStr).length;
@@ -798,7 +861,7 @@ function Dashboard({ navigate }) {
         const days = [];
         for (let i = 0; i < 7; i++) {
             const d = new Date(Date.now() + i * 86400000);
-            const key = d.toISOString().slice(0, 10);
+            const key = localDateKey(d);
             days.push({ key, label: d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }), count: byDate[key] || 0 });
         }
         return days;
@@ -848,7 +911,7 @@ function Dashboard({ navigate }) {
             React.createElement("div", { className: "h-full flex flex-col min-h-0" },
                 React.createElement("div", { className: "flex items-center justify-between mb-2" },
                     React.createElement("p", { className: "text-xs font-semibold text-stone uppercase tracking-wide" }, "Active goals"),
-                    React.createElement("button", { onClick: () => navigate('finances','goals'), className: "text-forest2 text-xs font-semibold flex items-center gap-0.5 hover:underline" }, "View all ", React.createElement(Icon, { name: "chevron-right", size: 13 }))),
+                    React.createElement("button", { onClick: () => navigate('goals','list'), className: "text-forest2 text-xs font-semibold flex items-center gap-0.5 hover:underline" }, "View all ", React.createElement(Icon, { name: "chevron-right", size: 13 }))),
                 activeGoals.length === 0 ? (React.createElement(EmptyState, { icon: "target", title: "No goals yet", subtitle: "Set a goal to start tracking your progress." })) : (React.createElement("div", { className: "space-y-3 overflow-y-auto scroll-y pr-1" }, activeGoals.map(g => {
                     const pct = g.targetAmount > 0 ? (g.currentAmount / g.targetAmount) * 100 : 0;
                     return (React.createElement("div", { key: g.id },
@@ -877,6 +940,7 @@ function Dashboard({ navigate }) {
                         React.createElement("p", { className: "font-semibold text-forest truncate" }, t.category),
                         React.createElement("p", { className: "text-[11px] text-stone" }, fmtDate(t.date), " \u00B7 ", t.notes || 'No notes')),
                     React.createElement("span", { className: `text-sm font-bold shrink-0 ml-2 ${t.type === 'Income' ? 'text-forest2' : 'text-[#9C4B3E]'}` }, t.type === 'Income' ? '+' : '-', fmtMoney(t.amount))))))))) },
+        calendar: { span: 'lg:col-span-12', node: React.createElement(DashboardCalendarWidget, { navigate: navigate }) },
         stats: { span: 'lg:col-span-4', node: (
             React.createElement("div", { className: "h-full flex flex-col" },
                 React.createElement("p", { className: "text-xs font-semibold text-stone uppercase tracking-wide mb-3" }, "This week at a glance"),
@@ -894,39 +958,44 @@ function Dashboard({ navigate }) {
             React.createElement("div", { className: "h-full flex flex-col min-h-0" },
                 React.createElement("div", { className: "flex items-center justify-between mb-2" },
                     React.createElement("p", { className: "text-xs font-semibold text-stone uppercase tracking-wide" }, "Next 7 days"),
-                    React.createElement("button", { onClick: () => navigate('tasks','calendar'), className: "text-forest2 text-xs font-semibold flex items-center gap-0.5 hover:underline" }, "Calendar ", React.createElement(Icon, { name: "chevron-right", size: 13 }))),
+                    React.createElement("button", { onClick: () => navigate('calendar','agenda'), className: "text-forest2 text-xs font-semibold flex items-center gap-0.5 hover:underline" }, "Calendar ", React.createElement(Icon, { name: "chevron-right", size: 13 }))),
                 React.createElement("div", { className: "space-y-1 overflow-y-auto scroll-y pr-1 flex-1" }, next7.map(d => (React.createElement("div", { key: d.key, className: "flex items-center justify-between text-sm px-2 py-1.5 rounded-lg hover:bg-creamdark/40" },
                     React.createElement("span", { className: "text-forest" }, d.label),
                     d.count > 0 ? React.createElement("span", { className: "text-[10px] font-bold bg-forest2 text-cream px-2 py-0.5 rounded-full" }, d.count) : React.createElement("span", { className: "text-[10px] text-stone" }, "\u2014"))))))) },
         notes: { span: 'lg:col-span-4', node: React.createElement(NotesWidget, null) },
     };
-    const defaultOrder = ['savings', 'spending', 'goals', 'tasks', 'transactions', 'stats', 'agenda', 'notes'];
+    const defaultOrder = [...DEFAULT_DASHBOARD_ORDER];
     const order = (state.dashboardOrder && state.dashboardOrder.length ? state.dashboardOrder : defaultOrder).filter(id => widgetDefs[id] && !(state.dashboardHidden || []).includes(id));
     defaultOrder.forEach(id => { if (!order.includes(id) && !(state.dashboardHidden || []).includes(id))
         order.push(id); });
     const hiddenWidgets = defaultOrder.filter(id => (state.dashboardHidden || []).includes(id));
     const [dragId, setDragId] = useState(null);
     const [overId, setOverId] = useState(null);
-    const widthChoices = [{ value: 4, label: '¼', name: 'Quarter width' }, { value: 6, label: '½', name: 'Half width' }, { value: 8, label: '⅔', name: 'Two-thirds width' }, { value: 12, label: 'Full', name: 'Full width' }];
+    const widthChoices = [{ value: 3, label: 'S', name: 'Skinny width' }, { value: 4, label: 'M', name: 'Medium width' }, { value: 6, label: 'W', name: 'Wide width' }, { value: 12, label: 'F', name: 'Full width' }];
     const gridRef = useRef(null);
     const startResize = (e, id, startingWidth) => {
         e.preventDefault();
         e.stopPropagation();
         const grid = gridRef.current;
         if (!grid) return;
+        const getClientX = (event) => {
+            if (event.touches && event.touches[0]) return event.touches[0].clientX;
+            if (event.changedTouches && event.changedTouches[0]) return event.changedTouches[0].clientX;
+            return event.clientX;
+        };
         const gridRect = grid.getBoundingClientRect();
         const styles = window.getComputedStyle(grid);
         const gap = parseFloat(styles.columnGap || styles.gap || '16') || 16;
         const columns = window.innerWidth > 1023 ? 12 : 2;
         const unit = (gridRect.width - gap * (columns - 1)) / columns;
-        const startX = e.clientX;
+        const startX = getClientX(e);
         let latestWidth = startingWidth;
         const widthFromPointer = (clientX) => {
             const targetPixels = Math.max(unit * 3, Math.min(gridRect.width, gridRect.width * (startingWidth / columns) + (clientX - startX)));
             return Math.max(3, Math.min(12, Math.round((targetPixels + gap) / (unit + gap))));
         };
         const onMove = (moveEvent) => {
-            latestWidth = widthFromPointer(moveEvent.clientX);
+            latestWidth = widthFromPointer(getClientX(moveEvent));
             setResizePreview({ id, width: latestWidth });
         };
         const onUp = () => {
@@ -934,10 +1003,22 @@ function Dashboard({ navigate }) {
             setResizePreview(null);
             window.removeEventListener('pointermove', onMove);
             window.removeEventListener('pointerup', onUp);
+            window.removeEventListener('mousemove', onMove);
+            window.removeEventListener('mouseup', onUp);
+            window.removeEventListener('touchmove', onMove);
+            window.removeEventListener('touchend', onUp);
         };
         setResizePreview({ id, width: startingWidth });
-        window.addEventListener('pointermove', onMove);
-        window.addEventListener('pointerup', onUp, { once: true });
+        if (window.PointerEvent) {
+            window.addEventListener('pointermove', onMove);
+            window.addEventListener('pointerup', onUp, { once: true });
+        }
+        else {
+            window.addEventListener('mousemove', onMove);
+            window.addEventListener('mouseup', onUp, { once: true });
+            window.addEventListener('touchmove', onMove, { passive: false });
+            window.addEventListener('touchend', onUp, { once: true });
+        }
     };
     const [resizePreview, setResizePreview] = useState(null);
     const onDropReorder = (targetId) => {
@@ -954,17 +1035,17 @@ function Dashboard({ navigate }) {
     return (React.createElement("div", { className: "h-full flex flex-col gap-4" },
         React.createElement("div", { className: "flex items-center justify-between flex-wrap gap-2" },
             React.createElement("div", null,
-                React.createElement("h1", { className: "font-display text-2xl text-forest" }, "Welcome back to your grove"),
-                React.createElement("p", { className: "text-stone text-sm mt-0.5" }, "A quiet overview of your tasks, goals, and finances \u2014 cards stay in a clean row-first layout when rearranged.")),
+                React.createElement("h1", { className: "font-display text-2xl text-forest" }, "Welcome back to your grove \uD83C\uDF3F"),
+                React.createElement("p", { className: "text-stone text-sm mt-0.5" }, "A quiet overview of your tasks, goals, and finances.")),
             React.createElement("div", { className: "flex items-center gap-2 flex-wrap" },
                 hiddenWidgets.length > 0 && React.createElement("div", { className: "flex items-center gap-1 flex-wrap" },
                     React.createElement("span", { className: "text-xs text-stone" }, "Add:"),
-                    hiddenWidgets.map(id => React.createElement("button", { key: id, onClick: () => setDashboardHidden(id, false), className: "btn btn-outline btn-sm !px-2" }, id))),
+                    hiddenWidgets.map(id => React.createElement("button", { key: id, onClick: () => setDashboardHidden(id, false), className: "btn btn-outline btn-sm !px-2" }, id.charAt(0).toUpperCase() + id.slice(1)))),
                 React.createElement("button", { onClick: resetDashboard, className: "btn btn-outline btn-sm" }, "Reset layout"))),
         React.createElement("div", { ref: gridRef, className: "dashboard-grid flex-1 min-h-0 content-start" }, order.map(id => {
             const w = widgetDefs[id];
             const storedWidth = Number((state.dashboardSizes || {})[id]);
-            const width = Number.isInteger(storedWidth) && storedWidth >= 3 && storedWidth <= 12 ? storedWidth : 4;
+            const width = Number.isInteger(storedWidth) && storedWidth >= 3 && storedWidth <= 12 ? storedWidth : (DEFAULT_DASHBOARD_SIZES[id] || 4);
             const displayWidth = resizePreview && resizePreview.id === id ? resizePreview.width : width;
             return (React.createElement("div", { key: id, draggable: true, style: { gridColumn: `span ${displayWidth} / span ${displayWidth}` }, onDragStart: () => setDragId(id), onDragOver: (e) => { e.preventDefault(); setOverId(id); }, onDragLeave: () => setOverId(o => o === id ? null : o), onDrop: (e) => { e.preventDefault(); onDropReorder(id); }, onDragEnd: () => { setDragId(null); setOverId(null); }, className: `dash-resizable card p-5 relative group transition-shadow ${overId === id && dragId && dragId !== id ? 'ring-2 ring-forest2' : ''} ${dragId === id ? 'opacity-40' : ''}` },
                 React.createElement("div", { className: "absolute top-2 right-2 flex items-center gap-1.5 z-10" },
@@ -1270,7 +1351,7 @@ function PomodoroTimer({ onClose }) {
             React.createElement("button", { type: "button", onClick: () => setRunning(value => !value), className: "btn btn-primary" }, running ? "Pause" : seconds === 0 ? "Start again" : "Start"),
             React.createElement("button", { type: "button", onClick: reset, className: "btn btn-outline" }, "Reset"))));
 }
-function Tasks({ nav } = {}) {
+function Tasks({ nav, navigate } = {}) {
     const { state, updateTask } = useApp();
     const [modalOpen, setModalOpen] = useState(false);
     const [editing, setEditing] = useState(null);
@@ -1282,7 +1363,6 @@ function Tasks({ nav } = {}) {
     const [statusFilter, setStatusFilter] = useState('All');
     const [viewMode, setViewMode] = useState('board');
     const [timerOpen, setTimerOpen] = useState(false);
-    const [calendarDate, setCalendarDate] = useState(null);
     const [collapsedCols, setCollapsedCols] = useState(() => { try { return JSON.parse(localStorage.getItem(STORAGE_KEY + '.collapsedCols') || '{}'); } catch (e) { return {}; } });
     useEffect(() => { try { localStorage.setItem(STORAGE_KEY + '.collapsedCols', JSON.stringify(collapsedCols)); } catch (e) {} }, [collapsedCols]);
     useEffect(() => {
@@ -1291,17 +1371,7 @@ function Tasks({ nav } = {}) {
         if (nav.sub === 'board') { setViewMode('board'); setStatusFilter('All'); }
         else if (nav.sub === 'list') { setViewMode('list'); setStatusFilter('All'); }
         else if (nav.sub === 'completed') { setViewMode('list'); setStatusFilter('Completed'); }
-        else if (nav.sub === 'calendar') { setViewMode('calendar'); setStatusFilter('All'); }
     }, [nav && nav.ts]);
-    useEffect(() => {
-        const calendarOnly = viewMode === 'calendar';
-        document.documentElement.classList.toggle('calendar-only-mode', calendarOnly);
-        document.body.classList.toggle('calendar-only-mode', calendarOnly);
-        return () => {
-            document.documentElement.classList.remove('calendar-only-mode');
-            document.body.classList.remove('calendar-only-mode');
-        };
-    }, [viewMode]);
     const [evidenceTask, setEvidenceTask] = useState(null);
     const [catModalOpen, setCatModalOpen] = useState(false);
     const columns = ['Backlog', 'In Progress', 'Completed'];
@@ -1337,8 +1407,8 @@ function Tasks({ nav } = {}) {
         }
         updateTask(id, { status });
     };
-    return (React.createElement("div", { className: viewMode === 'calendar' ? "calendar-task-shell flex flex-col" : "h-full flex flex-col gap-4" },
-        viewMode !== 'calendar' && React.createElement("div", { className: "flex items-center justify-between flex-wrap gap-2" },
+    return (React.createElement("div", { className: "h-full flex flex-col gap-4" },
+        React.createElement("div", { className: "flex items-center justify-between flex-wrap gap-2" },
             React.createElement("div", null,
                 React.createElement("h1", { className: "font-display text-2xl text-forest" }, "Task board"),
                 React.createElement("p", { className: "text-stone text-sm mt-0.5" }, "Drag cards between columns, or sort and filter below.")),
@@ -1346,7 +1416,7 @@ function Tasks({ nav } = {}) {
                 React.createElement("button", { onClick: () => setCatModalOpen(true), className: "btn btn-outline" },
                     React.createElement(Icon, { name: "gear", size: 15 }),
                     "Categories"),
-                React.createElement("button", { onClick: () => setViewMode('calendar'), className: "btn btn-outline" },
+                React.createElement("button", { onClick: () => navigate && navigate('calendar', 'month'), className: "btn btn-outline" },
                     React.createElement(Icon, { name: "calendar", size: 15 }),
                     "Calendar"),
                 React.createElement("button", { onClick: () => setTimerOpen(value => !value), className: `btn ${timerOpen ? 'btn-primary' : 'btn-outline'}` },
@@ -1354,9 +1424,9 @@ function Tasks({ nav } = {}) {
                 React.createElement("button", { onClick: openNew, className: "btn btn-primary" },
                     React.createElement(Icon, { name: "plus", size: 15 }),
                     "New task"))),
-        viewMode !== 'calendar' && timerOpen && React.createElement(PomodoroTimer, { onClose: () => setTimerOpen(false) }),
-        viewMode !== 'calendar' && React.createElement(TaskOverview, null),
-        viewMode !== 'calendar' && React.createElement("div", { className: "flex items-end gap-3 flex-wrap" },
+        timerOpen && React.createElement(PomodoroTimer, { onClose: () => setTimerOpen(false) }),
+        React.createElement(TaskOverview, null),
+        React.createElement("div", { className: "flex items-end gap-3 flex-wrap" },
             React.createElement("div", { className: "w-40" },
                 React.createElement("span", { className: "block text-xs font-semibold text-stone mb-1" }, "Sort by"),
                 React.createElement("select", { className: "input-field", value: sortBy, onChange: e => setSortBy(e.target.value) },
@@ -1382,7 +1452,7 @@ function Tasks({ nav } = {}) {
                     React.createElement(Icon, { name: "grid", size: 15 })),
                 React.createElement("button", { onClick: () => setViewMode('list'), title: "List view", className: `p-1.5 rounded-md ${viewMode === 'list' ? 'bg-cream shadow-softer text-forest' : 'text-stone'}` },
                     React.createElement(Icon, { name: "list", size: 15 })))),
-        viewMode === 'calendar' ? React.createElement(Calendar2, { nav: { sub: 'month', ts: 1 } }) : viewMode === 'board' ? React.createElement("div", { className: "grid grid-cols-1 sm:grid-cols-3 gap-4 flex-1 min-h-0" }, columns.map(col => {
+        viewMode === 'board' ? React.createElement("div", { className: "grid grid-cols-1 sm:grid-cols-3 gap-4 flex-1 min-h-0" }, columns.map(col => {
             const items = sortItems(state.tasks.filter(t => t.status === col && matchesTaskFilters(t)));
             return (React.createElement("div", { key: col, onDragOver: (e) => { e.preventDefault(); setDragOverCol(col); }, onDragLeave: () => setDragOverCol(null), onDrop: (e) => onDrop(e, col), className: `rounded-xl2 border border-creamdark bg-creamdark/30 p-3 flex flex-col min-h-0 ${dragOverCol === col ? 'dropzone-active' : ''}` },
                 React.createElement("button", { className: "flex items-center justify-between mb-2 px-1 text-left", onClick: () => setCollapsedCols(c => ({ ...c, [col]: !c[col] })) },
@@ -1396,7 +1466,6 @@ function Tasks({ nav } = {}) {
          React.createElement(CategoryManagerModal, { open: catModalOpen, onClose: () => setCatModalOpen(false), types: [{ key: 'task', label: 'Task' }], title: 'Manage task categories' })));
 }
 /* ---------------- Goals ---------------- */
-/* Goals component preserved but will be reachable via Finances → Goals (tab) */
 function GoalModal({ open, onClose, editing }) {
     const { addGoal, updateGoal, addCategory, state } = useApp();
     const goalCats = state.categories.goal || [];
@@ -1652,7 +1721,7 @@ function CategoryManager({ types }) {
 }
 function TransactionForm() {
     const { state, addTransaction, addCategory } = useApp();
-    const [form, setForm] = useState({ type: 'Expense', amount: '', date: new Date().toISOString().slice(0, 10), category: '', notes: '' });
+    const [form, setForm] = useState({ type: 'Expense', amount: '', date: localDateKey(), category: '', notes: '' });
     const catKey = form.type === 'Income' ? 'income' : 'expense';
     const cats = state.categories[catKey] || [];
     const submit = (e) => {
@@ -1847,10 +1916,10 @@ function QuickLogModal({ open, onClose, type }) {
     const { state, addTransaction, addCategory } = useApp();
     const catKey = type === 'Income' ? 'income' : 'expense';
     const cats = state.categories[catKey] || [];
-    const [form, setForm] = useState({ amount: '', date: new Date().toISOString().slice(0, 10), category: '', notes: '' });
+    const [form, setForm] = useState({ amount: '', date: localDateKey(), category: '', notes: '' });
     useEffect(() => {
         if (open)
-            setForm({ amount: '', date: new Date().toISOString().slice(0, 10), category: '', notes: '' });
+            setForm({ amount: '', date: localDateKey(), category: '', notes: '' });
     }, [open, type]);
     if (!open)
         return null;
@@ -1897,7 +1966,7 @@ function Finances({ nav } = {}) {
             React.createElement("div", null,
                 React.createElement("h1", { className: "font-display text-2xl text-forest" }, "Finances"),
                 React.createElement("p", { className: "text-stone text-sm mt-0.5" }, "Track income, expenses, and your master savings target.")),
-            React.createElement("div", { className: "flex gap-1.5" }, [['overview', 'Overview'], ['transactions', 'Transactions'], ['categories', 'Categories & budgets'], ['goals', 'Goals']].map(([id, label]) => (React.createElement("button", { key: id, onClick: () => setTab(id), className: `tab-btn ${tab === id ? 'active' : ''}` }, label))))),
+            React.createElement("div", { className: "flex gap-1.5" }, [['overview', 'Overview'], ['transactions', 'Transactions'], ['categories', 'Categories & budgets']].map(([id, label]) => (React.createElement("button", { key: id, onClick: () => setTab(id), className: `tab-btn ${tab === id ? 'active' : ''}` }, label))))),
         React.createElement("div", { className: "flex-1 min-h-0" },
             tab === 'overview' && (React.createElement("div", { className: "flex flex-col gap-4 h-full min-h-0" },
                 React.createElement("div", { className: "grid grid-cols-1 sm:grid-cols-3 gap-4" },
@@ -1969,7 +2038,6 @@ function Finances({ nav } = {}) {
                 React.createElement("div", { className: "card p-5 min-h-0 flex flex-col" },
                     React.createElement("p", { className: "text-xs font-semibold text-stone uppercase tracking-wide mb-2" }, "Budget limits vs. actual spend"),
                     React.createElement(BudgetTable, null)))),
-            tab === 'goals' && React.createElement(Goals, { nav: { sub: 'list', ts: Date.now() } })),
         React.createElement(QuickLogModal, { open: !!quickLog, onClose: () => setQuickLog(null), type: quickLog })));
 }
 
@@ -2022,7 +2090,7 @@ function Calendar({ nav } = {}) {
     const [modalOpen, setModalOpen] = useState(false);
     const [editing, setEditing] = useState(null);
     const [newInitial, setNewInitial] = useState(null);
-    const todayStr = new Date().toISOString().slice(0, 10);
+    const todayStr = localDateKey();
     const byDate = useMemo(() => {
         const m = {};
         state.tasks.forEach(t => { if (t.dueDate) { if (!m[t.dueDate]) m[t.dueDate] = []; m[t.dueDate].push(t); } });
@@ -2332,7 +2400,7 @@ function Settings({ nav } = {}) {
                     React.createElement(Field, { label: "Default status" },
                         React.createElement("select", { className: "input-field", value: state.preferences.defaultStatus, onChange: e => setPreference('defaultStatus', e.target.value) }, React.createElement("option", null, "Backlog"), React.createElement("option", null, "In Progress"), React.createElement("option", null, "Completed")))),
                 React.createElement("p", { className: "font-semibold text-forest text-sm mt-1" }, "Show dashboard widgets"),
-                React.createElement("div", { className: "grid grid-cols-2 gap-2 text-sm" }, [['savings', 'Savings'], ['spending', 'Spending'], ['goals', 'Goals'], ['tasks', 'Upcoming tasks'], ['transactions', 'Transactions'], ['stats', 'Weekly stats'], ['agenda', 'Next 7 days'], ['notes', 'Quick notes']].map(([id, label]) => React.createElement("label", { key: id, className: "flex items-center gap-2 text-stone" }, React.createElement("input", { type: "checkbox", checked: !(state.dashboardHidden || []).includes(id), onChange: e => setDashboardHidden(id, !e.target.checked), className: "accent-forest2" }), label))),
+                React.createElement("div", { className: "grid grid-cols-2 gap-2 text-sm" }, [['savings', 'Savings'], ['spending', 'Spending'], ['goals', 'Goals'], ['calendar', 'Calendar'], ['tasks', 'Upcoming tasks'], ['transactions', 'Transactions'], ['stats', 'Weekly stats'], ['agenda', 'Next 7 days'], ['notes', 'Quick notes']].map(([id, label]) => React.createElement("label", { key: id, className: "flex items-center gap-2 text-stone" }, React.createElement("input", { type: "checkbox", checked: !(state.dashboardHidden || []).includes(id), onChange: e => setDashboardHidden(id, !e.target.checked), className: "accent-forest2" }), label))),
                 React.createElement("div", { className: "pt-3 mt-1 border-t border-creamdark" },
                     React.createElement("p", { className: "font-semibold text-forest text-sm mb-1" }, "Browser reminders"),
                     React.createElement("p", { className: "text-xs text-stone mb-2" }, "Get a reminder when an open task reaches its due time while this planner is open."),
@@ -2414,7 +2482,9 @@ function App() {
                 React.createElement("div", { className: "app-content flex-1 min-w-0 p-3 sm:p-4 pb-16 sm:pb-4" },
                     React.createElement(ViewErrorBoundary, { key: view },
                         view === 'dashboard' && React.createElement(Dashboard, { navigate: navigate }),
-                        view === 'tasks' && nav.sub === 'progress' ? React.createElement(ProgressReport, null) : view === 'tasks' && React.createElement(Tasks, { nav: nav }),
+                        view === 'tasks' && nav.sub === 'progress' ? React.createElement(ProgressReport, null) : view === 'tasks' && React.createElement(Tasks, { nav: nav, navigate: navigate }),
+                        view === 'calendar' && React.createElement(Calendar, { nav: nav }),
+                        view === 'goals' && React.createElement(Goals, { nav: nav }),
                         view === 'finances' && React.createElement(Finances, { nav: nav }),
                         view === 'settings' && React.createElement(Settings, { nav: nav })))),
             React.createElement(MobileNav, { view: view, setView: setView }))));
